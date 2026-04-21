@@ -17,11 +17,11 @@ try:
     from utils import calculate_ear, calculate_mar, estimate_head_pitch
     from detection import DrowsinessDetector
 except ImportError as e:
-    st.error(f"Missing local file: {e}. Ensure model_loader.py, utils.py, and detection.py are in this folder.")
+    st.error(f"Missing local file: {e}")
     st.stop()
 
 # --- 2. STREAMLIT UI CONFIG ---
-st.set_page_config(page_title="Driver Drowsiness Monitor", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Driver Monitor", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
@@ -35,6 +35,7 @@ st.markdown("""
     .alert-box { background-color: #ff4b4b; color: white; padding: 15px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 20px; }
     .awake-box { background-color: #4caf50; color: white; padding: 15px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 20px; }
     header {visibility: hidden;}
+    [data-testid="stSidebar"] {display: none;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,10 +45,6 @@ st.title("🚙 Driver Drowsiness Detection")
 @st.cache_resource
 def load_models():
     model_path_mp = 'face_landmarker.task'
-    if not os.path.exists(model_path_mp):
-        st.error(f"Critical File Missing: {model_path_mp}. Download it to run detection.")
-        st.stop()
-        
     base_options = python.BaseOptions(model_asset_path=model_path_mp)
     options = vision.FaceLandmarkerOptions(
         base_options=base_options,
@@ -57,31 +54,22 @@ def load_models():
     face_mesh = vision.FaceLandmarker.create_from_options(options)
     
     model_path_pt = "drowsiness_detection_model_v1.pth"
-    if not os.path.exists(model_path_pt):
-        st.warning(f"PyTorch Model {model_path_pt} not found. Running in Math-only mode.")
-        return face_mesh, None
-        
-    dl_model = DrowsinessModelLoader(model_path=model_path_pt, device='cpu')
+    dl_model = DrowsinessModelLoader(model_path=model_path_pt, device='cpu') if os.path.exists(model_path_pt) else None
     return face_mesh, dl_model
 
 face_mesh_model, pytorch_model = load_models()
 
-# MediaPipe Landmark Constants
 LEFT_EYE_IDXS = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE_IDXS = [362, 385, 387, 263, 373, 380]
 MOUTH_IDXS = [78, 81, 13, 311, 308, 402, 14, 178] 
 
-# --- SESSION STATE TRACKING ---
+# --- SESSION STATE ---
 if 'is_running' not in st.session_state:
     st.session_state.is_running = False
 if 'alarm_active' not in st.session_state:
     st.session_state.alarm_active = False
 if 'last_alarm_time' not in st.session_state:
     st.session_state.last_alarm_time = 0
-
-# Sidebar
-st.sidebar.header("⚙️ Settings")
-use_model = st.sidebar.checkbox("Use Deep Learning Model", value=True)
 
 # UI Layout
 col1, col2 = st.columns([2, 1])
@@ -106,7 +94,7 @@ with col2:
     fatigue_placeholder = st.empty()
     audio_placeholder = st.empty()
 
-detector = DrowsinessDetector(ear_threshold=0.25, mar_threshold=0.6, pitch_threshold=0.4, closed_time_threshold=2.0)
+detector = DrowsinessDetector(ear_threshold=0.25, mar_threshold=0.6, pitch_threshold=0.6, closed_time_threshold=2.0)
 
 def play_alarm():
     try:
@@ -114,16 +102,12 @@ def play_alarm():
             audio_file = open("alarm.wav", "rb").read()
             b64_audio = base64.b64encode(audio_file).decode()
             unique_id = time.time() 
-            audio_html = f"""
-                <audio autoplay="true" key="{unique_id}">
-                    <source src="data:audio/wav;base64,{b64_audio}" type="audio/wav">
-                </audio>
-            """
+            audio_html = f"""<audio autoplay="true" key="{unique_id}"><source src="data:audio/wav;base64,{b64_audio}" type="audio/wav"></audio>"""
             audio_placeholder.markdown(audio_html, unsafe_allow_html=True)
-    except Exception:
+    except:
         pass
 
-# --- 4. MAIN EXECUTION LOOP ---
+# --- 4. MAIN LOOP ---
 if st.session_state.is_running:
     cap = cv2.VideoCapture(0)
     try:
@@ -149,52 +133,37 @@ if st.session_state.is_running:
                 current_mar = calculate_mar([landmarks[i] for i in MOUTH_IDXS])
                 current_pitch = estimate_head_pitch(landmarks, w, h)
                 
-                # --- NEW: IR Simulation for DL Model ---
-                if use_model and pytorch_model is not None:
+                # Background DL Inference
+                if pytorch_model:
                     try:
                         gray = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2GRAY)
-                        simulated_ir = cv2.equalizeHist(gray) # Simulates high contrast MRL dataset
-                        
-                        if hasattr(pytorch_model, 'predict'):
-                            model_eye_state = pytorch_model.predict(simulated_ir)
-                        else:
-                            model_eye_state = 1
-                    except Exception:
+                        simulated_ir = cv2.equalizeHist(gray) 
+                        model_eye_state = pytorch_model.predict(simulated_ir) if hasattr(pytorch_model, 'predict') else 1
+                    except:
                         model_eye_state = 1 
 
-                # EVALUATE ALERTS
                 alerts = detector.evaluate(current_ear, current_mar, current_pitch, model_eye_state)
                 
                 if alerts:
                     alert_placeholder.markdown(f'<div class="alert-box">🚨 {" | ".join(alerts)}</div>', unsafe_allow_html=True)
-                    
-                    physical_signs = [a for a in alerts if a != "HIGH FATIGUE SCORE"]
-                    
-                    if physical_signs:
-                        # Auto-Repeat Logic: Re-trigger every 3 seconds if state persists
-                        current_time = time.time()
-                        if not st.session_state.alarm_active or (current_time - st.session_state.last_alarm_time > 3.0):
+                    if [a for a in alerts if a != "HIGH FATIGUE SCORE"]:
+                        now = time.time()
+                        if not st.session_state.alarm_active or (now - st.session_state.last_alarm_time > 3.0):
                             play_alarm()
                             st.session_state.alarm_active = True
-                            st.session_state.last_alarm_time = current_time
-                    else:
-                        # High Fatigue ONLY -> Silent warning
-                        st.session_state.alarm_active = False
-                        audio_placeholder.empty()
+                            st.session_state.last_alarm_time = now
                 else:
                     alert_placeholder.markdown('<div class="awake-box">✅ AWAKE</div>', unsafe_allow_html=True)
                     st.session_state.alarm_active = False
-                    st.session_state.last_alarm_time = 0
                     audio_placeholder.empty()
                 
-                # Visual Feedback
+                # Visuals
                 dot_color = (0, 255, 0) if current_ear > 0.25 else (255, 0, 0)
                 for i in LEFT_EYE_IDXS + RIGHT_EYE_IDXS:
                     cx, cy = int(landmarks[i][0] * w), int(landmarks[i][1] * h)
                     cv2.circle(rgb_frame, (cx, cy), 2, dot_color, -1)
 
             frame_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
-            
             ear_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">EAR</div><div class="metric-value">{current_ear:.2f}</div></div>', unsafe_allow_html=True)
             mar_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">MAR</div><div class="metric-value">{current_mar:.2f}</div></div>', unsafe_allow_html=True)
             fatigue_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">Fatigue</div><div class="metric-value">{detector.fatigue_score:.1f}</div></div>', unsafe_allow_html=True)
@@ -203,4 +172,4 @@ if st.session_state.is_running:
     finally:
         cap.release()
 else:
-    frame_placeholder.info("Click 'Start Camera' to begin.")
+    frame_placeholder.info("Ready for monitoring. Click Start.")
