@@ -133,7 +133,6 @@ if st.session_state.is_running:
                 current_mar = calculate_mar([landmarks[i] for i in MOUTH_IDXS])
                 current_pitch = estimate_head_pitch(landmarks, w, h)
                 
-                # Background DL Inference
                 if pytorch_model:
                     try:
                         gray = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2GRAY)
@@ -157,13 +156,20 @@ if st.session_state.is_running:
                     st.session_state.alarm_active = False
                     audio_placeholder.empty()
                 
-                # Visuals
-                dot_color = (0, 255, 0) if current_ear > 0.25 else (255, 0, 0)
+                # --- VISUAL MARKERS ---
+                # Eyes: Red if closed, Green if open
+                eye_color = (0, 255, 0) if current_ear > 0.25 else (255, 0, 0)
                 for i in LEFT_EYE_IDXS + RIGHT_EYE_IDXS:
                     cx, cy = int(landmarks[i][0] * w), int(landmarks[i][1] * h)
-                    cv2.circle(rgb_frame, (cx, cy), 2, dot_color, -1)
+                    cv2.circle(rgb_frame, (cx, cy), 2, eye_color, -1)
+                
+                # Mouth: Green if closed, Red if yawn (MAR > 0.6)
+                mouth_color = (0, 255, 0) if current_mar <= 0.6 else (255, 0, 0)
+                for i in MOUTH_IDXS:
+                    cx, cy = int(landmarks[i][0] * w), int(landmarks[i][1] * h)
+                    cv2.circle(rgb_frame, (cx, cy), 2, mouth_color, -1)
 
-            # Eye Status Logic
+            # Eye Status UI Card
             eye_status = "OPEN" if current_ear > 0.25 else "CLOSED"
             status_color = "#4caf50" if eye_status == "OPEN" else "#ff4b4b"
 
