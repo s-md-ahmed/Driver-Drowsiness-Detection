@@ -128,21 +128,25 @@ if st.session_state.is_running:
                 face_lms = detection_result.face_landmarks[0]
                 landmarks = [(lm.x, lm.y) for lm in face_lms]
                 
+                # Calculations
                 current_ear = (calculate_ear([landmarks[i] for i in LEFT_EYE_IDXS]) + 
                                calculate_ear([landmarks[i] for i in RIGHT_EYE_IDXS])) / 2.0
                 current_mar = calculate_mar([landmarks[i] for i in MOUTH_IDXS])
                 current_pitch = estimate_head_pitch(landmarks, w, h)
                 
+                # PyTorch Inference with 224x224 Resize
                 if pytorch_model:
                     try:
                         gray = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2GRAY)
-                        simulated_ir = cv2.equalizeHist(gray) 
+                        resized_gray = cv2.resize(gray, (224, 224))
+                        simulated_ir = cv2.equalizeHist(resized_gray) 
                         model_eye_state = pytorch_model.predict(simulated_ir) if hasattr(pytorch_model, 'predict') else 1
                     except:
                         model_eye_state = 1 
 
                 alerts = detector.evaluate(current_ear, current_mar, current_pitch, model_eye_state)
                 
+                # Alert System
                 if alerts:
                     alert_placeholder.markdown(f'<div class="alert-box">🚨 {" | ".join(alerts)}</div>', unsafe_allow_html=True)
                     if [a for a in alerts if a != "HIGH FATIGUE SCORE"]:
@@ -157,19 +161,19 @@ if st.session_state.is_running:
                     audio_placeholder.empty()
                 
                 # --- VISUAL MARKERS ---
-                # Eyes: Red if closed, Green if open
+                # Eye dots: Green if Open, Red if Closed
                 eye_color = (0, 255, 0) if current_ear > 0.25 else (255, 0, 0)
                 for i in LEFT_EYE_IDXS + RIGHT_EYE_IDXS:
                     cx, cy = int(landmarks[i][0] * w), int(landmarks[i][1] * h)
                     cv2.circle(rgb_frame, (cx, cy), 2, eye_color, -1)
                 
-                # Mouth: Green if closed, Red if yawn (MAR > 0.6)
+                # Mouth dots: Green if Closed, Red if Yawn
                 mouth_color = (0, 255, 0) if current_mar <= 0.6 else (255, 0, 0)
                 for i in MOUTH_IDXS:
                     cx, cy = int(landmarks[i][0] * w), int(landmarks[i][1] * h)
                     cv2.circle(rgb_frame, (cx, cy), 2, mouth_color, -1)
 
-            # Eye Status UI Card
+            # UI Metrics Cards
             eye_status = "OPEN" if current_ear > 0.25 else "CLOSED"
             status_color = "#4caf50" if eye_status == "OPEN" else "#ff4b4b"
 
