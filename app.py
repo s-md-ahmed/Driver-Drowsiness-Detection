@@ -89,7 +89,7 @@ with col1:
 with col2:
     st.subheader("Live Metrics")
     alert_placeholder = st.empty()
-    ear_placeholder = st.empty()
+    eye_status_placeholder = st.empty()
     mar_placeholder = st.empty()
     fatigue_placeholder = st.empty()
     audio_placeholder = st.empty()
@@ -163,8 +163,12 @@ if st.session_state.is_running:
                     cx, cy = int(landmarks[i][0] * w), int(landmarks[i][1] * h)
                     cv2.circle(rgb_frame, (cx, cy), 2, dot_color, -1)
 
+            # Eye Status Logic
+            eye_status = "OPEN" if current_ear > 0.25 else "CLOSED"
+            status_color = "#4caf50" if eye_status == "OPEN" else "#ff4b4b"
+
             frame_placeholder.image(rgb_frame, channels="RGB", use_container_width=True)
-            ear_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">EAR</div><div class="metric-value">{current_ear:.2f}</div></div>', unsafe_allow_html=True)
+            eye_status_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">EYE STATUS</div><div class="metric-value" style="color:{status_color};">{eye_status}</div></div>', unsafe_allow_html=True)
             mar_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">MAR</div><div class="metric-value">{current_mar:.2f}</div></div>', unsafe_allow_html=True)
             fatigue_placeholder.markdown(f'<div class="metric-card"><div class="metric-title">Fatigue</div><div class="metric-value">{detector.fatigue_score:.1f}</div></div>', unsafe_allow_html=True)
             
